@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SPUI 批量改名 (修复拖拽版)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <style>
+        :root { --primary: #4f46e5; --bg: #f3f4f6; --text: #1f2937; --success: #10b981; --border: #e2e8f0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); max-width: 1000px; margin: 30px auto; padding: 20px; }
+        
+        .container { background: white; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); padding: 30px; }
+        h1 { margin-top: 0; font-size: 24px; color: var(--primary); display: flex; align-items: center; gap: 10px; margin-bottom: 25px; }
+        .badge { background: #dbeafe; color: #1e40af; font-size: 12px; padding: 2px 8px; border-radius: 99px; }
+
+        /* 配置区域 */
+        .config-panel { background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; padding: 20px; display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-end; }
+        
+        .config-group { display: flex; flex-direction: column; gap: 6px; }
+        .config-label { font-size: 13px; font-weight: bold; color: #64748b; }
+        
+        .input-wrapper { display: flex; align-items: center; background: white; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 10px; height: 40px; font-family: monospace; font-size: 15px; transition: 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+        .input-wrapper:focus-within { border-color: var(--primary); ring: 2px solid #e0e7ff; }
+        .fixed-text { color: #94a3b8; user-select: none; }
+        
+        .main-input { border: none; outline: none; font-weight: bold; color: var(--primary); font-family: inherit; font-size: inherit; text-align: center; width: 100px; }
+        .main-input::placeholder { color: #cbd5e1; font-weight: normal; }
+        
+        .mode-hint { font-size: 12px; color: #f59e0b; display: none; margin-top: 5px; }
+
+        /* 上传区 */
+        .upload-area { margin-top: 20px; border: 2px dashed #cbd5e1; border-radius: 8px; padding: 30px; text-align: center; cursor: pointer; transition: 0.3s; background: #fff; }
+        .upload-area.highlight { border-color: var(--primary); background: #eef2ff; transform: scale(1.01); }
+        .upload-icon { font-size: 32px; display: block; margin-bottom: 5px; }
+
+        /* 控制栏 */
+        .controls { margin-top: 20px; display: flex; justify-content: space-between; align-items: center; display: none; }
+        .btn { background: var(--primary); color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 14px; transition: 0.2s; font-weight: 500; }
+        .btn:hover { filter: brightness(1.1); }
+        .btn:disabled { background: #9ca3af; cursor: not-allowed; filter: none; }
+        .btn-danger { background: #fee2e2; color: #ef4444; }
+        .btn-danger:hover { background: #fecaca; }
+        .btn-trans { background: #10b981; }
+
+        /* 表格 */
+        .table-wrap { max-height: 450px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; margin-top: 20px; display: none; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th { background: #f9fafb; position: sticky; top: 0; text-align: left; padding: 12px; z-index: 10; border-bottom: 1px solid var(--border); color: #475569; }
+        td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+        
+        .name-input { border: 1px solid #d1d5db; padding: 5px; border-radius: 4px; width: 100%; font-family: monospace; color: var(--primary); }
+        .name-input:disabled { background: #f1f5f9; color: #94a3b8; border-color: transparent; cursor: not-allowed; }
+
+        .hl-p { color: #94a3b8; }
+        .hl-m { color: #1d4ed8; font-weight: bold; }
+        .hl-b { color: var(--primary); font-weight: bold; }
+        .hl-ext { color: #94a3b8; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>SPUI 批量改名 <span class="badge">V5.1 修复版</span></h1>
+
+    <!-- 核心配置栏 -->
+    <div class="config-panel">
+        <div class="config-group">
+            <label class="config-label">1. 模块前缀 (CatchMatch/Shop...)</label>
+            <div class="input-wrapper">
+                <span class="fixed-text">spui_</span>
+                <input type="text" id="moduleInput" class="main-input" value="catchmatch" placeholder="模块名" oninput="refreshAll()">
+                <span class="fixed-text">_</span>
+            </div>
+        </div>
+
+        <div class="config-group" style="flex-grow: 1;">
+            <label class="config-label">2. 统一词根 (选填，填了则统一命名)</label>
+            <div class="input-wrapper">
+                <input type="text" id="baseNameInput" class="main-input" style="width: 100%; text-align: left;" 
+                       placeholder="空=按原义翻译 | 填值=统一序列 (如 item)" oninput="refreshAll()">
+                <span class="fixed-text" id="seqPreview">_xx.png</span>
+            </div>
+            <div id="modeHint" class="mode-hint">⚡ 已启用统一模式：所有图片将直接命名为该词根+序号</div>
+        </div>
+    </div>
+
+    <!-- 上传区域 -->
+    <div class="upload-area" id="dropZone">
+        <span class="upload-icon">📂</span>
+        <input type="file" id="fileInput" multiple accept="image/*" style="display:none" onchange="processFiles(this.files)">
+        <div><strong>点击添加图片</strong> 或直接拖拽至此</div>
+    </div>
+
+    <!-- 功能按钮 -->
+    <div class="controls" id="controlPanel">
+        <div style="display:flex; gap: 10px;">
+            <button class="btn btn-danger" onclick="clearList()">🗑️ 清空</button>
+            <button class="btn btn-trans" id="freeTransBtn" onclick="autoTranslateFree()">⚡ 一键翻译(生词)</button>
+        </div>
+        <div style="text-align: right;">
+            <span style="font-size: 13px; color: #64748b; margin-right: 10px;">进度: <span id="progressText">0/0</span></span>
+            <button class="btn" id="downloadBtn" onclick="downloadZip()" disabled>⬇️ 打包下载</button>
+        </div>
+    </div>
+
+    <!-- 文件列表 -->
+    <div class="table-wrap" id="tableWrap">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 30%">原文件名</th>
+                    <th style="width: 35%">英文语义 (Individual)</th>
+                    <th style="width: 35%">最终预览</th>
+                </tr>
+            </thead>
+            <tbody id="fileListBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    // ================== 初始化与配置 ==================
+    const DICT = {
+        "背景":"background","冰冻":"frozen","分数":"score","积分":"points","金币":"coin",
+        "按钮":"btn","关闭":"close","返回":"back","盲盒":"blindbox","轨道":"track",
+        "球":"ball","深渊巨爪":"abyss_claw","万能":"wild","爪子":"claw","激活":"active",
+        "未激活":"inactive","排行榜":"rank","抓抓乐":"catch","时间冻结":"timefrozen",
+        "球-红":"ball_red","球-蓝":"ball_blue","大地图":"icon_worldmap"
+    };
+
+    let filesData = [];
+
+    // ================== 核心逻辑 ==================
+
+    function processFiles(files) {
+        if (!files.length) return;
+        document.getElementById('tableWrap').style.display = 'block';
+        document.getElementById('controlPanel').style.display = 'flex';
+        
+        const startId = filesData.length;
+        const list = Array.from(files).sort((a,b) => a.name.localeCompare(b.name));
+
+        list.forEach((file, i) => {
+            const index = startId + i;
+            const namePart = file.name.substring(0, file.name.lastIndexOf('.'));
+            const ext = file.name.substring(file.name.lastIndexOf('.'));
+            
+            let trans = lookup(namePart);
+            
+            filesData.push({
+                id: index,
+                file: file,
+                originalName: namePart,
+                ext: ext,
+                translated: trans || "", 
+                finalName: ""
+            });
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${namePart}</td>
+                <td>
+                    <input type="text" class="name-input" id="input_${index}" 
+                           value="${trans || ''}" 
+                           placeholder="请输入翻译..." 
+                           oninput="updateSingle(${index}, this.value)">
+                </td>
+                <td id="preview_${index}" style="font-family:monospace; font-size:12px; color:#666;"></td>
+            `;
+            document.getElementById('fileListBody').appendChild(tr);
+        });
+
+        refreshAll();
+    }
+
+    function refreshAll() {
+        const moduleVal = document.getElementById('moduleInput').value.trim().toLowerCase() || "common";
+        const baseVal = document.getElementById('baseNameInput').value.trim().toLowerCase();
+        
+        const isUnified = baseVal.length > 0;
+        document.getElementById('modeHint').style.display = isUnified ? 'block' : 'none';
+        document.getElementById('freeTransBtn').style.display = isUnified ? 'none' : 'inline-flex';
+        document.getElementById('seqPreview').textContent = isUnified ? "_01.png" : "_frozen.png";
+
+        const prefix = `spui_${moduleVal}_`;
+
+        const nameCounts = {};
+        if (!isUnified) {
+            filesData.forEach(d => {
+                if(d.translated) nameCounts[d.translated] = (nameCounts[d.translated]||0) + 1;
+            });
+        }
+        const currentCounts = {};
+        let readyCount = 0;
+
+        filesData.forEach((d, i) => {
+            const inputEl = document.getElementById(`input_${d.id}`);
+            const previewEl = document.getElementById(`preview_${d.id}`);
+
+            if (isUnified) {
+                inputEl.disabled = true;
+                inputEl.value = "🚫 统一模式中..."; 
+                const num = (i + 1).toString().padStart(2, '0');
+                const body = `${baseVal}_${num}`;
+                d.finalName = `${prefix}${body}${d.ext}`;
+                renderPreview(previewEl, moduleVal, body, d.ext);
+                readyCount++;
+            } else {
+                inputEl.disabled = false;
+                if (inputEl.value.includes("🚫")) inputEl.value = d.translated;
+
+                if (!d.translated) {
+                    d.finalName = "";
+                    previewEl.innerHTML = `<span style="color:#f87171">Waiting...</span>`;
+                    inputEl.style.borderColor = "#f87171";
+                    inputEl.style.background = "#fff1f2";
+                } else {
+                    inputEl.style.borderColor = "#e2e8f0";
+                    inputEl.style.background = "#fff";
+                    
+                    let suffix = "";
+                    if (nameCounts[d.translated] > 1) {
+                        currentCounts[d.translated] = (currentCounts[d.translated]||0) + 1;
+                        suffix = `_${currentCounts[d.translated].toString().padStart(2, '0')}`;
+                    }
+                    const body = d.translated + suffix;
+                    d.finalName = `${prefix}${body}${d.ext}`;
+                    renderPreview(previewEl, moduleVal, body, d.ext);
+                    readyCount++;
+                }
+            }
+        });
+
+        const total = filesData.length;
+        document.getElementById('progressText').textContent = `${readyCount}/${total}`;
+        document.getElementById('downloadBtn').disabled = (readyCount < total || total === 0);
+        
+        if (!isUnified) {
+            const unknowns = filesData.filter(d => !d.translated).length;
+            document.getElementById('freeTransBtn').style.display = unknowns > 0 ? 'inline-flex' : 'none';
+        }
+    }
+
+    function renderPreview(el, mod, body, ext) {
+        el.innerHTML = `
+            <span class="hl-p">spui_</span><span class="hl-m">${mod}</span>_<span class="hl-b">${body}</span><span class="hl-ext">${ext}</span>
+        `;
+    }
+
+    function updateSingle(id, val) {
+        const d = filesData.find(x => x.id === id);
+        if (d) {
+            d.translated = val.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+            refreshAll();
+        }
+    }
+
+    function lookup(name) {
+        if (DICT[name]) return DICT[name];
+        const parts = name.split(/[-_]/);
+        if (parts.length > 1) {
+            const map = parts.map(p => DICT[p]||"").filter(p=>p);
+            if(map.length === parts.length) return map.join('_');
+        }
+        return "";
+    }
+
+    function clearList() {
+        if(confirm("确定清空吗？")) {
+            filesData = [];
+            document.getElementById('fileListBody').innerHTML = "";
+            document.getElementById('tableWrap').style.display = 'none';
+            document.getElementById('controlPanel').style.display = 'none';
+            document.getElementById('fileInput').value = "";
+            refreshAll();
+        }
+    }
+
+    async function autoTranslateFree() {
+        const unknowns = filesData.filter(d => !d.translated);
+        if(!unknowns.length) return;
+        const btn = document.getElementById('freeTransBtn');
+        const oldTxt = btn.textContent;
+        btn.textContent = "⏳ 翻译中..."; btn.disabled = true;
+
+        for (let item of unknowns) {
+            try {
+                const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(item.originalName)}&langpair=zh|en`);
+                const json = await res.json();
+                if(json.responseData?.translatedText) {
+                    const eng = json.responseData.translatedText.replace(/['".]/g,'');
+                    item.translated = eng.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+                    document.getElementById(`input_${item.id}`).value = item.translated;
+                }
+            } catch(e){}
+            await new Promise(r=>setTimeout(r,300));
+        }
+        btn.textContent = oldTxt; btn.disabled = false;
+        refreshAll();
+    }
+
+    function downloadZip() {
+        const zip = new JSZip();
+        const mod = document.getElementById('moduleInput').value || "renamed";
+        const folder = zip.folder(`spui_${mod}`);
+        filesData.forEach(d => { if(d.finalName) folder.file(d.finalName, d.file); });
+        
+        const btn = document.getElementById('downloadBtn');
+        btn.textContent = "打包中..."; btn.disabled = true;
+        zip.generateAsync({type:"blob"}).then(c => {
+            saveAs(c, `spui_${mod}.zip`);
+            btn.textContent = "⬇️ 打包下载"; btn.disabled = false;
+        });
+    }
+
+    // ================== 修复的拖拽逻辑 ==================
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+
+    // 1. 点击触发
+    dropZone.addEventListener('click', () => fileInput.click());
+
+    // 2. 核心修复：阻止所有拖拽事件的默认行为
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, preventDefaults, false);
+    });
+
+    function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+
+    // 3. 高亮效果
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropZone.addEventListener(eventName, highlight, false);
+    });
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, unhighlight, false);
+    });
+
+    function highlight(e) { dropZone.classList.add('highlight'); }
+    function unhighlight(e) { dropZone.classList.remove('highlight'); }
+
+    // 4. 处理文件 Drop
+    dropZone.addEventListener('drop', handleDrop, false);
+
+    function handleDrop(e) {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        processFiles(files);
+    }
+</script>
+</body>
+</html>
